@@ -1,31 +1,43 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices.WindowsRuntime;
+// MainWindow.xaml.cs
+using FocusMate.Views;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Data;
-using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
-using Windows.Foundation;
-using Windows.Foundation.Collections;
-
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
 
 namespace FocusMate
 {
-    /// <summary>
-    /// An empty window that can be used on its own or navigated to within a Frame.
-    /// </summary>
     public sealed partial class MainWindow : Window
     {
         public MainWindow()
         {
             InitializeComponent();
+            ExtendsContentIntoTitleBar = true;
+            SetTitleBar(AppTitleBar);
+
+            // Navigate to timer page by default
+            ContentFrame.Navigate(typeof(TimerPage));
+        }
+
+        private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+        {
+            if (args.SelectedItem is NavigationViewItem item)
+            {
+                switch (item.Tag.ToString())
+                {
+                    case "TimerPage":
+                        ContentFrame.Navigate(typeof(TimerPage));
+                        break;
+                    case "AnalyticsPage":
+                        ContentFrame.Navigate(typeof(AnalyticsPage));
+                        break;
+                    case "TasksPage":
+                        ContentFrame.Navigate(typeof(TasksPage));
+                        break;
+                    case "SettingsPage":
+                        ContentFrame.Navigate(typeof(SettingsPage));
+                        break;
+                }
+            }
         }
     }
 }

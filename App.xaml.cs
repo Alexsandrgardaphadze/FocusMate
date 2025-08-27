@@ -1,50 +1,79 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices.WindowsRuntime;
+﻿// App.xaml.cs
+using FocusMate.Models;
+using FocusMate.Services;
+using FocusMate.ViewModels;
+using FocusMate.Views;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Data;
-using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Navigation;
-using Microsoft.UI.Xaml.Shapes;
-using Windows.ApplicationModel;
-using Windows.ApplicationModel.Activation;
-using Windows.Foundation;
-using Windows.Foundation.Collections;
-
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
+using System;
 
 namespace FocusMate
 {
-    /// <summary>
-    /// Provides application-specific behavior to supplement the default Application class.
-    /// </summary>
     public partial class App : Application
     {
         private Window? _window;
+        public static IServiceProvider? Services { get; private set; }
 
-        /// <summary>
-        /// Initializes the singleton application object.  This is the first line of authored code
-        /// executed, and as such is the logical equivalent of main() or WinMain().
-        /// </summary>
         public App()
         {
             InitializeComponent();
+            Services = ConfigureServices();
         }
 
-        /// <summary>
-        /// Invoked when the application is launched.
-        /// </summary>
-        /// <param name="args">Details about the launch request and process.</param>
-        protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
+        private static IServiceProvider ConfigureServices()
+        {
+            var services = new ServiceCollection();
+
+            // Services
+            services.AddSingleton<TimerService>();
+            services.AddSingleton<SessionService>();
+            services.AddSingleton<StorageService>();
+            services.AddSingleton<NotificationService>();
+            services.AddSingleton<TrayService>();
+            services.AddSingleton<FocusLockService>();
+            services.AddSingleton<AnalyticsService>();
+
+            // Models
+            services.AddSingleton<SettingsModel>();
+
+            // ViewModels
+            services.AddTransient<TimerViewModel>();
+            services.AddTransient<AnalyticsViewModel>();
+            services.AddTransient<TasksViewModel>();
+            services.AddTransient<SettingsViewModel>();
+
+            return services.BuildServiceProvider();
+        }
+
+        protected override async void OnLaunched(LaunchActivatedEventArgs args)
         {
             _window = new MainWindow();
+
+            // Initialize services
+            var storageService = Services.GetService<StorageService>();
+            await storageService.InitializeAsync();
+
+            var settings = Services.GetService<SettingsModel>();
+            var savedSettings = await storageService.LoadSettingsAsync();
+
+            // Copy saved settings to current settings
+            if (savedSettings != null)
+            {
+                settings.DefaultFocusMinutes = savedSettings.DefaultFocusMinutes;
+                settings.ShortBreakMinutes = savedSettings.ShortBreakMinutes;
+                settings.LongBreakMinutes = savedSettings.LongBreakMinutes;
+                settings.AutoStartNext = savedSettings.AutoStartNext;
+                settings.UseWindowsNotificationSound = savedSettings.UseWindowsNotificationSound;
+                settings.CustomSoundPath = savedSettings.CustomSoundPath;
+                settings.BlockedApps = savedSettings.BlockedApps;
+                settings.BlockedSites = savedSettings.BlockedSites;
+            }
+
             _window.Activate();
+
+            // Initialize tray service
+            var trayService = Services.GetService<TrayService>();
+            trayService.Initialize(_window);
         }
     }
 }
