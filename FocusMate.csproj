@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
@@ -12,6 +12,14 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+  <ItemGroup>
+    <None Remove="Resources\DataTemplates.xaml" />
+    <None Remove="Resources\Styles.xaml" />
+    <None Remove="Views\AnalyticsPage.xaml" />
+    <None Remove="Views\SettingsPage.xaml" />
+    <None Remove="Views\TasksPage.xaml" />
+    <None Remove="Views\TimerPage.xaml" />
+  </ItemGroup>
 
   <ItemGroup>
     <Content Include="Assets\SplashScreen.scale-200.png" />
@@ -42,12 +50,39 @@
   <ItemGroup>
     <Folder Include="Assets\Icons\" />
     <Folder Include="Assets\Sounds\" />
-    <Folder Include="Models\" />
     <Folder Include="Helpers\" />
-    <Folder Include="Resources\" />
     <Folder Include="Services\" />
     <Folder Include="ViewModels\" />
-    <Folder Include="Views\" />
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="Views\SettingsPage.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="Views\TasksPage.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="Views\AnalyticsPage.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="Views\TimerPage.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="Resources\DataTemplates.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="Resources\Styles.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
   </ItemGroup>
 
   <!--

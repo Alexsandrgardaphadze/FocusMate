@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace FocusMate.Views
+namespace FocusMate.Models
 {
-    internal class AnalyticsPage
+    internal class Session
     {
     }
 }
