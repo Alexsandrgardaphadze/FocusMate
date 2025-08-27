@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "FocusMate (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "FocusMate (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
