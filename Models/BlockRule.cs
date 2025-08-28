@@ -36,6 +36,9 @@ namespace FocusMate.Models
 
         [JsonPropertyName("gracePeriodSeconds")]
         public int GracePeriodSeconds { get; set; } = 5;
+
+        [JsonPropertyName("isActive")]
+        public bool IsActive { get; set; } = true;
     }
 
     public sealed class SiteBlockRule
@@ -52,8 +55,11 @@ namespace FocusMate.Models
         [JsonPropertyName("action")]
         public BlockAction Action { get; set; } = BlockAction.Warn;
 
-        [JsonPropertyName("subdomains")]
+        [JsonPropertyName("includeSubdomains")]
         public bool IncludeSubdomains { get; set; } = true;
+
+        [JsonPropertyName("isActive")]
+        public bool IsActive { get; set; } = true;
     }
 
     public enum BlockAction

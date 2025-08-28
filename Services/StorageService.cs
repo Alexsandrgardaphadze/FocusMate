@@ -1,10 +1,13 @@
 ﻿// Services/StorageService.cs
+using FocusMate.Models;
+using Microsoft.UI.Dispatching;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Windows.Storage;
-using FocusMate.Models;
 
 namespace FocusMate.Services
 {
@@ -12,27 +15,89 @@ namespace FocusMate.Services
     {
         private readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
         {
-            WriteIndented = true
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         };
 
-        private StorageFolder _localFolder;
+        private StorageFolder _dataFolder = ApplicationData.Current.LocalFolder;
+        private readonly DispatcherQueue _dispatcherQueue;
 
         public StorageService()
         {
-            _localFolder = ApplicationData.Current.LocalFolder;
+            _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+            InitializeDataFolderAsync().FireAndForget();
         }
 
-        public async Task InitializeAsync()
+        private async Task InitializeDataFolderAsync()
         {
-            // Create app directory if it doesn't exist
             try
             {
-                await _localFolder.CreateFolderAsync("FocusMate", CreationCollisionOption.OpenIfExists);
+                _dataFolder = await ApplicationData.Current.LocalFolder.CreateFolderAsync(
+                    "FocusMateData", CreationCollisionOption.OpenIfExists);
             }
             catch (Exception ex)
             {
-                // Handle exception
-                Console.WriteLine($"Error creating directory: {ex.Message}");
+                // Log error
+                System.Diagnostics.Debug.WriteLine($"Error creating data folder: {ex.Message}");
+            }
+        }
+
+        private async Task<StorageFile> GetOrCreateFileAsync(string fileName)
+        {
+            try
+            {
+                return await _dataFolder.CreateFileAsync(
+                    fileName, CreationCollisionOption.OpenIfExists);
+            }
+            catch (Exception ex)
+            {
+                // Log error
+                System.Diagnostics.Debug.WriteLine($"Error creating file {fileName}: {ex.Message}");
+                throw;
+            }
+        }
+
+        private async Task<T> ReadFileAsync<T>(string fileName)
+        {
+            try
+            {
+                var file = await _dataFolder.GetFileAsync(fileName);
+                var json = await FileIO.ReadTextAsync(file);
+                return JsonSerializer.Deserialize<T>(json, _jsonOptions)
+                    ?? throw new InvalidDataException("Deserialization returned null");
+            }
+            catch (FileNotFoundException)
+            {
+                throw new FileNotFoundException($"File {fileName} not found");
+            }
+            catch (Exception ex)
+            {
+                // Log error
+                System.Diagnostics.Debug.WriteLine($"Error reading {fileName}: {ex.Message}");
+                throw;
+            }
+        }
+
+        private async Task WriteFileAsync<T>(string fileName, T data)
+        {
+            try
+            {
+                var tempFile = await _dataFolder.CreateFileAsync(
+                    $"{fileName}.tmp", CreationCollisionOption.ReplaceExisting);
+
+                var json = JsonSerializer.Serialize(data, _jsonOptions);
+                await FileIO.WriteTextAsync(tempFile, json);
+
+                var finalFile = await _dataFolder.CreateFileAsync(
+                    fileName, CreationCollisionOption.ReplaceExisting);
+
+                await tempFile.MoveAndReplaceAsync(finalFile);
+            }
+            catch (Exception ex)
+            {
+                // Log error
+                System.Diagnostics.Debug.WriteLine($"Error writing {fileName}: {ex.Message}");
+                throw;
             }
         }
 
@@ -40,14 +105,12 @@ namespace FocusMate.Services
         {
             try
             {
-                var file = await _localFolder.CreateFileAsync("sessions.json", CreationCollisionOption.ReplaceExisting);
-                var json = JsonSerializer.Serialize(sessions, _jsonOptions);
-                await FileIO.WriteTextAsync(file, json);
+                await WriteFileAsync("sessions.json", sessions);
             }
             catch (Exception ex)
             {
-                // Handle exception
-                Console.WriteLine($"Error saving sessions: {ex.Message}");
+                // Log error
+                System.Diagnostics.Debug.WriteLine($"Error saving sessions: {ex.Message}");
             }
         }
 
@@ -55,9 +118,7 @@ namespace FocusMate.Services
         {
             try
             {
-                var file = await _localFolder.GetFileAsync("sessions.json");
-                var json = await FileIO.ReadTextAsync(file);
-                return JsonSerializer.Deserialize<Session[]>(json) ?? Array.Empty<Session>();
+                return await ReadFileAsync<Session[]>("sessions.json");
             }
             catch (FileNotFoundException)
             {
@@ -65,8 +126,7 @@ namespace FocusMate.Services
             }
             catch (Exception ex)
             {
-                // Handle exception
-                Console.WriteLine($"Error loading sessions: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Error loading sessions: {ex.Message}");
                 return Array.Empty<Session>();
             }
         }
@@ -75,14 +135,11 @@ namespace FocusMate.Services
         {
             try
             {
-                var file = await _localFolder.CreateFileAsync("settings.json", CreationCollisionOption.ReplaceExisting);
-                var json = JsonSerializer.Serialize(settings, _jsonOptions);
-                await FileIO.WriteTextAsync(file, json);
+                await WriteFileAsync("settings.json", settings);
             }
             catch (Exception ex)
             {
-                // Handle exception
-                Console.WriteLine($"Error saving settings: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Error saving settings: {ex.Message}");
             }
         }
 
@@ -90,9 +147,7 @@ namespace FocusMate.Services
         {
             try
             {
-                var file = await _localFolder.GetFileAsync("settings.json");
-                var json = await FileIO.ReadTextAsync(file);
-                return JsonSerializer.Deserialize<SettingsModel>(json) ?? new SettingsModel();
+                return await ReadFileAsync<SettingsModel>("settings.json");
             }
             catch (FileNotFoundException)
             {
@@ -100,45 +155,70 @@ namespace FocusMate.Services
             }
             catch (Exception ex)
             {
-                // Handle exception
-                Console.WriteLine($"Error loading settings: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Error loading settings: {ex.Message}");
                 return new SettingsModel();
             }
         }
 
-        public async Task SaveBlockRulesAsync(BlockRule rules)
+        public async Task ExportSessionsToCsvAsync(StorageFile file)
         {
             try
             {
-                var file = await _localFolder.CreateFileAsync("blockrules.json", CreationCollisionOption.ReplaceExisting);
-                var json = JsonSerializer.Serialize(rules, _jsonOptions);
-                await FileIO.WriteTextAsync(file, json);
+                var sessions = await LoadSessionsAsync();
+                var csv = BuildCsvFromSessions(sessions);
+
+                await FileIO.WriteTextAsync(file, csv);
             }
             catch (Exception ex)
             {
-                // Handle exception
-                Console.WriteLine($"Error saving block rules: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Error exporting sessions: {ex.Message}");
+                throw;
             }
         }
 
-        public async Task<BlockRule> LoadBlockRulesAsync()
+        private string BuildCsvFromSessions(Session[] sessions)
         {
-            try
+            var csv = new StringBuilder();
+            csv.AppendLine("StartTime,EndTime,DurationMinutes,Label,Category,Mode,WasInterrupted");
+
+            foreach (var session in sessions)
             {
-                var file = await _localFolder.GetFileAsync("blockrules.json");
-                var json = await FileIO.ReadTextAsync(file);
-                return JsonSerializer.Deserialize<BlockRule>(json) ?? new BlockRule();
+                csv.AppendLine(
+                    $"{session.StartUtc:yyyy-MM-dd HH:mm}," +
+                    $"{session.EndUtc:yyyy-MM-dd HH:mm}," +
+                    $"{session.DurationMinutes}," +
+                    $"{EscapeCsvField(session.Label)}," +
+                    $"{EscapeCsvField(session.Category)}," +
+                    $"{session.Mode}," +
+                    $"{session.WasInterrupted}");
             }
-            catch (FileNotFoundException)
+
+            return csv.ToString();
+        }
+
+        private string EscapeCsvField(string field)
+        {
+            if (string.IsNullOrEmpty(field)) return string.Empty;
+            if (field.Contains(",") || field.Contains("\"") || field.Contains("\n"))
             {
-                return new BlockRule();
+                return $"\"{field.Replace("\"", "\"\"")}\"";
             }
-            catch (Exception ex)
+            return field;
+        }
+    }
+
+    // Helper extension for fire-and-forget tasks with error logging
+    internal static class TaskExtensions
+    {
+        public static void FireAndForget(this Task task)
+        {
+            task.ContinueWith(t =>
             {
-                // Handle exception
-                Console.WriteLine($"Error loading block rules: {ex.Message}");
-                return new BlockRule();
-            }
+                if (t.IsFaulted)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Task failed: {t.Exception?.Message}");
+                }
+            }, TaskScheduler.Default);
         }
     }
 }

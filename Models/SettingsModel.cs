@@ -7,6 +7,9 @@ namespace FocusMate.Models
 {
     public sealed class SettingsModel
     {
+        [JsonPropertyName("schemaVersion")]
+        public int SchemaVersion { get; set; } = 1;
+
         [JsonPropertyName("defaultFocusMinutes")]
         public int DefaultFocusMinutes { get; set; } = 50;
 
@@ -25,14 +28,8 @@ namespace FocusMate.Models
         [JsonPropertyName("customSoundPath")]
         public string? CustomSoundPath { get; set; }
 
-        [JsonPropertyName("blockedApps")]
-        public List<string> BlockedApps { get; set; } = new();
-
-        [JsonPropertyName("blockedSites")]
-        public List<string> BlockedSites { get; set; } = new();
-
-        [JsonPropertyName("focusLockEnabled")]
-        public bool FocusLockEnabled { get; set; } = true;
+        [JsonPropertyName("blockRule")]
+        public BlockRule BlockRule { get; set; } = new BlockRule();
 
         [JsonPropertyName("runMinimized")]
         public bool RunMinimized { get; set; }

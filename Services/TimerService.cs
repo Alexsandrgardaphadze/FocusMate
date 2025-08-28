@@ -1,18 +1,21 @@
 ﻿// Services/TimerService.cs
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using FocusMate.Models;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
 using System;
 using System.Diagnostics;
-using System.Timers;
-using CommunityToolkit.Mvvm.ComponentModel;
-using FocusMate.Models;
 
 namespace FocusMate.Services
 {
     public partial class TimerService : ObservableObject, IDisposable
     {
         private readonly Stopwatch _stopwatch = new Stopwatch();
-        private readonly Timer _timer = new Timer(1000);
-        private TimeSpan _remainingTime;
+        private readonly DispatcherTimer _uiTimer;
         private TimeSpan _sessionDuration;
+        private TimeSpan _remainingTime;
+        private bool _isDisposing;
 
         [ObservableProperty]
         private TimerMode _currentMode = TimerMode.Focus;
@@ -30,10 +33,13 @@ namespace FocusMate.Services
         public event EventHandler? TimerStarted;
         public event EventHandler? TimerPaused;
         public event EventHandler? TimerCompleted;
+        public event EventHandler<TimerModeChangedEventArgs>? ModeChanged;
 
         public TimerService()
         {
-            _timer.Elapsed += OnTimerElapsed;
+            // Use DispatcherTimer for UI-safe updates
+            _uiTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+            _uiTimer.Tick += OnTimerTick;
         }
 
         public void Initialize(SettingsModel settings)
@@ -43,9 +49,12 @@ namespace FocusMate.Services
 
         public void SetMode(TimerMode mode, TimeSpan duration)
         {
-            CurrentMode = mode;
+            var previousMode = _currentMode;
+            _currentMode = mode;
             _sessionDuration = duration;
             _remainingTime = duration;
+
+            ModeChanged?.Invoke(this, new TimerModeChangedEventArgs(previousMode, mode));
             OnPropertyChanged(nameof(RemainingTimeFormatted));
         }
 
@@ -54,7 +63,7 @@ namespace FocusMate.Services
             if (!IsRunning)
             {
                 _stopwatch.Start();
-                _timer.Start();
+                _uiTimer.Start();
                 IsRunning = true;
                 TimerStarted?.Invoke(this, EventArgs.Empty);
             }
@@ -65,7 +74,7 @@ namespace FocusMate.Services
             if (IsRunning)
             {
                 _stopwatch.Stop();
-                _timer.Stop();
+                _uiTimer.Stop();
                 IsRunning = false;
                 TimerPaused?.Invoke(this, EventArgs.Empty);
             }
@@ -74,17 +83,18 @@ namespace FocusMate.Services
         public void Reset()
         {
             _stopwatch.Reset();
-            _timer.Stop();
+            _uiTimer.Stop();
             _remainingTime = _sessionDuration;
             IsRunning = false;
             OnPropertyChanged(nameof(RemainingTimeFormatted));
         }
 
-        private void OnTimerElapsed(object? sender, ElapsedEventArgs e)
+        private void OnTimerTick(object? sender, object e)
         {
-            _remainingTime = _sessionDuration - _stopwatch.Elapsed;
+            var elapsed = _stopwatch.Elapsed;
+            _remainingTime = _sessionDuration - elapsed;
 
-            if (_remainingTime.TotalSeconds <= 0)
+            if (_remainingTime <= TimeSpan.Zero)
             {
                 CompleteTimer();
             }
@@ -97,7 +107,7 @@ namespace FocusMate.Services
 
         private void CompleteTimer()
         {
-            _timer.Stop();
+            _uiTimer.Stop();
             _stopwatch.Reset();
             IsRunning = false;
             _remainingTime = TimeSpan.Zero;
@@ -106,11 +116,19 @@ namespace FocusMate.Services
         }
 
         public string RemainingTimeFormatted =>
-            $"{_remainingTime.Minutes:00}:{_remainingTime.Seconds:00}";
+            _remainingTime.Hours > 0
+                ? $"{_remainingTime.Hours:00}:{_remainingTime.Minutes:00}:{_remainingTime.Seconds:00}"
+                : $"{_remainingTime.Minutes:00}:{_remainingTime.Seconds:00}";
+
+        public TimeSpan Elapsed => _stopwatch.Elapsed;
 
         public void Dispose()
         {
-            _timer?.Dispose();
+            if (_isDisposing) return;
+            _isDisposing = true;
+
+            _uiTimer?.Stop();
+            _uiTimer?.Tick -= OnTimerTick;
             _stopwatch?.Stop();
         }
     }
@@ -122,6 +140,18 @@ namespace FocusMate.Services
         public TimerTickEventArgs(TimeSpan remainingTime)
         {
             RemainingTime = remainingTime;
+        }
+    }
+
+    public class TimerModeChangedEventArgs : EventArgs
+    {
+        public TimerMode PreviousMode { get; }
+        public TimerMode NewMode { get; }
+
+        public TimerModeChangedEventArgs(TimerMode previousMode, TimerMode newMode)
+        {
+            PreviousMode = previousMode;
+            NewMode = newMode;
         }
     }
 }

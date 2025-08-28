@@ -21,6 +21,9 @@ namespace FocusMate.Models
         [JsonPropertyName("createdDate")]
         public DateTimeOffset CreatedDate { get; set; } = DateTimeOffset.UtcNow;
 
+        [JsonPropertyName("lastUsed")]
+        public DateTimeOffset? LastUsed { get; set; }
+
         [JsonIgnore]
         public string DisplayName => IsDefault ? $"{Name} (Default)" : Name;
 

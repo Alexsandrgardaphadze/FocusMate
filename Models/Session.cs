@@ -13,10 +13,7 @@ namespace FocusMate.Models
         public DateTimeOffset StartUtc { get; set; } = DateTimeOffset.UtcNow;
 
         [JsonPropertyName("endUtc")]
-        public DateTimeOffset EndUtc { get; set; }
-
-        [JsonPropertyName("durationMinutes")]
-        public int DurationMinutes { get; set; }
+        public DateTimeOffset EndUtc { get; set; } = default;
 
         [JsonPropertyName("label")]
         public string Label { get; set; } = string.Empty;
@@ -31,14 +28,16 @@ namespace FocusMate.Models
         public TimerMode Mode { get; set; } = TimerMode.Focus;
 
         [JsonIgnore]
+        public int DurationMinutes => (int)(EndUtc - StartUtc).TotalMinutes;
+
+        [JsonIgnore]
         public string FormattedDuration =>
             DurationMinutes >= 60
                 ? $"{DurationMinutes / 60}h {DurationMinutes % 60}m"
                 : $"{DurationMinutes}m";
 
-        // (Optional) Convenience property for quick check
         [JsonIgnore]
-        public bool IsCompleted => EndUtc > StartUtc && DurationMinutes > 0;
+        public bool IsCompleted => EndUtc > StartUtc;
     }
 
     public enum TimerMode
