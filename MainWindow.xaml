@@ -6,22 +6,41 @@
     xmlns:local="using:FocusMate"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    mc:Ignorable="d"
-    RequestedTheme="Dark">
+    mc:Ignorable="d">
+    <!-- Removed RequestedTheme="Dark" from Window -->
+
+    <!-- Apply Mica backdrop -->
+    <Window.SystemBackdrop>
+        <MicaBackdrop/>
+    </Window.SystemBackdrop>
 
     <Grid>
-        <NavigationView x:Name="NavView" 
-                       PaneDisplayMode="LeftCompact"
-                       IsBackButtonVisible="Collapsed"
-                       IsSettingsVisible="True"
-                       SelectionChanged="NavView_SelectionChanged">
-            <NavigationView.MenuItems>
-                <NavigationViewItem Content="Timer" Icon="Play" Tag="TimerPage" />
-                <NavigationViewItem Content="Analytics" Icon="Chart" Tag="AnalyticsPage" />
-                <NavigationViewItem Content="Tasks" Icon="Taskboard" Tag="TasksPage" />
-            </NavigationView.MenuItems>
+        <!-- Set the theme for the main content grid -->
+        <Grid RequestedTheme="Dark">
+            <NavigationView x:Name="NavView" 
+                           PaneDisplayMode="LeftCompact"
+                           IsBackButtonVisible="Collapsed"
+                           IsSettingsVisible="True"
+                           SelectionChanged="NavView_SelectionChanged">
+                <NavigationView.MenuItems>
+                    <!-- Use standard SymbolIcon values -->
+                    <NavigationViewItem Content="Timer" Icon="Play" Tag="TimerPage" />
+                    <NavigationViewItem Content="Analytics" Icon="OutlineStar" Tag="AnalyticsPage" />
+                    <!-- OutlineStar is a reasonable substitute for Chart -->
+                    <NavigationViewItem Content="Tasks" Icon="List" Tag="TasksPage" />
+                    <!-- List is a standard substitute for Taskboard -->
 
-            <Frame x:Name="ContentFrame" Margin="24"/>
-        </NavigationView>
+                    <!-- Alternative: Define custom icons using PathIcon or BitmapIcon if you have specific assets
+                    <NavigationViewItem Content="Analytics" Tag="AnalyticsPage">
+                        <NavigationViewItem.Icon>
+                            <FontIcon Glyph="&#xE9D2;"/> 
+                        </NavigationViewItem.Icon>
+                    </NavigationViewItem>
+                    -->
+                </NavigationView.MenuItems>
+
+                <Frame x:Name="ContentFrame" Margin="24"/>
+            </NavigationView>
+        </Grid>
     </Grid>
 </Window>
