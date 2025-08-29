@@ -4,14 +4,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FocusMate.Models;
-using FocusMate.Services;
 
 namespace FocusMate.Services
 {
     public class AnalyticsService
     {
         private readonly SessionService _sessionService;
-        private readonly SettingsService _settingsService;
+        // REMOVED: SettingsService dependency (not needed for current analytics)
+        // private readonly SettingsService _settingsService;
 
         // Caching to prevent repeated expensive calculations
         private readonly Dictionary<DateTimeOffset, DailySummary> _dailyCache = new();
@@ -20,10 +20,11 @@ namespace FocusMate.Services
         private StreakInfo _streakInfoCache;
         private DateTimeOffset _lastCacheUpdate = DateTimeOffset.MinValue;
 
-        public AnalyticsService(SessionService sessionService, SettingsService settingsService)
+        public AnalyticsService(SessionService sessionService)
         {
             _sessionService = sessionService;
-            _settingsService = settingsService;
+            // REMOVED: SettingsService parameter
+            // _settingsService = settingsService;
         }
 
         public async Task<DailySummary> GetDailySummaryAsync(DateTimeOffset date)
