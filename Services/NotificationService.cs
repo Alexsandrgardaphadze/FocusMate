@@ -21,30 +21,49 @@ namespace FocusMate.Services
         private bool _isDisposed;
         private Uri _logoUri;
         private MediaPlayer _mediaPlayer; // Keep reference to prevent GC
+        // IMPROVED: Add continuation for error logging on the asset validation task
         private Task _validateAssetsTask; // Async asset validation
 
         public NotificationService(SettingsModel settings, DispatcherQueue dispatcherQueue)
         {
-            _settings = settings;
-            _dispatcherQueue = dispatcherQueue;
+            _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _dispatcherQueue = dispatcherQueue ?? throw new ArgumentNullException(nameof(dispatcherQueue));
             Initialize();
-            _validateAssetsTask = ValidateAssetsAsync(); // Start validation
+            // IMPROVED: Add continuation for unobserved exceptions
+            _validateAssetsTask = ValidateAssetsAsync()
+                .ContinueWith(
+                    t => System.Diagnostics.Debug.WriteLine($"Notification asset validation failed: {t.Exception?.InnerException?.Message}"),
+                    TaskContinuationOptions.OnlyOnFaulted
+                );
         }
 
+        /// <summary>
+        /// Initializes the notification manager and subscribes to activation events.
+        /// This should be called once during application startup.
+        /// </summary>
         private void Initialize()
         {
             try
             {
-                // Register at app level - don't dispose unless app shuts down
+                // Register the app to receive notifications.
+                // This should ideally be done once, typically during app startup.
+                // Unregistering should only happen when the app shuts down.
                 AppNotificationManager.Default.Register();
+
+                // Subscribe to the event that fires when a notification is clicked/activated.
                 AppNotificationManager.Default.NotificationInvoked += OnNotificationInvoked;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Notification init failed: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Notification service initialization failed: {ex.Message}");
+                // Depending on requirements, you might want to handle this more gracefully,
+                // perhaps by disabling notifications or showing a user-friendly message.
             }
         }
 
+        /// <summary>
+        /// Asynchronously validates and loads the logo assets for notifications.
+        /// </summary>
         private async Task ValidateAssetsAsync()
         {
             try
@@ -54,7 +73,7 @@ namespace FocusMate.Services
             }
             catch
             {
-                // Try fallback logo
+                // Try fallback logo if the primary one fails
                 try
                 {
                     _logoUri = new Uri("ms-appx:///Assets/Square44x44Logo.png");
@@ -62,27 +81,32 @@ namespace FocusMate.Services
                 }
                 catch (Exception fallbackEx)
                 {
-                    // Both logos failed - set to null to avoid invalid URIs
+                    // Both logos failed - set to null to indicate no valid logo.
+                    // The AppNotificationBuilder will handle a null Uri gracefully.
                     _logoUri = null;
-                    System.Diagnostics.Debug.WriteLine($"Both logo files failed to load: {fallbackEx.Message}");
+                    System.Diagnostics.Debug.WriteLine($"Notification logo validation failed: {fallbackEx.Message}");
                 }
             }
         }
 
-        // FIXED: Changed from async void to async Task
-        public async Task ShowSessionCompleteNotification(TimerMode mode)
+        /// <summary>
+        /// Sends a session completion notification with an action button.
+        /// </summary>
+        /// <param name="mode">The timer mode that just completed.</param>
+        /// <returns>The ID of the sent notification, or 0 if sending failed.</returns>
+        public async Task<uint> ShowSessionCompleteNotification(TimerMode mode)
         {
             try
             {
-                // Wait for asset validation if needed
+                // Ensure asset validation is complete before building the notification
                 await _validateAssetsTask;
 
                 string title = mode switch
                 {
-                    TimerMode.Focus => "Focus session completed!",
-                    TimerMode.ShortBreak => "Short break completed!",
-                    TimerMode.LongBreak => "Long break completed!",
-                    _ => "Session completed!"
+                    TimerMode.Focus => "Focus Session Completed!",
+                    TimerMode.ShortBreak => "Short Break Completed!",
+                    TimerMode.LongBreak => "Long Break Completed!",
+                    _ => "Session Completed!"
                 };
 
                 string message = mode switch
@@ -93,44 +117,60 @@ namespace FocusMate.Services
                     _ => "Your session has ended."
                 };
 
+                // Build the notification using AppNotificationBuilder
                 var builder = new AppNotificationBuilder()
                     .AddText(title)
                     .AddText(message)
+                    // Add an action button to start the next focus session
                     .AddButton(new AppNotificationButton("Start Next Focus")
                         .AddArgument("action", "startFocus"))
-                    .SetDuration(AppNotificationDuration.Default)
-                    .AddTextBox("quickNote", "Quick Note", "Add quick note...");
+                    // Add a text input box for quick notes
+                    .AddTextBox("quickNote", "Quick Note", "Add a note...")
+                    // Set the notification duration
+                    .SetDuration(AppNotificationDuration.Default);
 
-                // Only set logo if it exists
+                // Conditionally set the logo if it was successfully loaded
                 if (_logoUri != null)
                 {
                     builder.SetAppLogoOverride(_logoUri);
                 }
 
                 var notification = builder.BuildNotification();
+
+                // Show the notification using the default notification manager
                 AppNotificationManager.Default.Show(notification);
+
+                // Play the configured notification sound
                 PlayNotificationSound();
+
+                // IMPROVED: Return the notification ID for potential future tracking
+                return notification.Id;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Failed to show notification: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Failed to show session complete notification: {ex.Message}");
+                return 0; // Return 0 to indicate failure
             }
         }
 
-        // FIXED: Changed from async void to async Task
-        public async Task ShowFocusLockNotification(string appName)
+        /// <summary>
+        /// Sends a focus lock notification when a distracting app is blocked.
+        /// </summary>
+        /// <param name="appName">The name of the blocked application.</param>
+        /// <returns>The ID of the sent notification, or 0 if sending failed.</returns>
+        public async Task<uint> ShowFocusLockNotification(string appName)
         {
             try
             {
-                // Wait for asset validation if needed
+                // Ensure asset validation is complete
                 await _validateAssetsTask;
 
                 var builder = new AppNotificationBuilder()
                     .AddText("Focus Lock Activated")
-                    .AddText($"Blocked access to {appName} during focus session")
-                    .SetDuration(AppNotificationDuration.Default);
+                    .AddText($"Blocked access to {appName} during focus session.")
+                    .SetDuration(AppNotificationDuration.Default); // Shorter duration for lock alerts
 
-                // Only set logo if it exists
+                // Conditionally set the logo
                 if (_logoUri != null)
                 {
                     builder.SetAppLogoOverride(_logoUri);
@@ -138,110 +178,177 @@ namespace FocusMate.Services
 
                 var notification = builder.BuildNotification();
                 AppNotificationManager.Default.Show(notification);
+
+                // Return the notification ID for potential future tracking
+                return notification.Id;
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Failed to show focus lock notification: {ex.Message}");
+                return 0; // Return 0 to indicate failure
             }
         }
 
+        /// <summary>
+        /// Handles the event when a notification is clicked or activated by the user.
+        /// </summary>
+        /// <param name="sender">The AppNotificationManager instance.</param>
+        /// <param name="args">Event arguments containing activation details.</param>
         private void OnNotificationInvoked(AppNotificationManager sender, AppNotificationActivatedEventArgs args)
         {
+            // Ensure UI-related actions are performed on the UI thread
             _dispatcherQueue.TryEnqueue(() =>
             {
                 try
                 {
-                    // Parse arguments with better structure
-                    var action = ParseArguments(args.Argument);
+                    // Parse the arguments passed by the notification action
+                    var parsedArgs = ParseArguments(args.Argument);
 
-                    // Handle action buttons
-                    if (action.Name == "startFocus")
+                    // Handle specific actions based on the 'action' argument
+                    if (parsedArgs.TryGetValue("action", out string action))
                     {
-                        // FIXED: Access TimerService through static Services property
-                        if (App.Services != null)
+                        switch (action)
                         {
-                            var timerService = App.Services.GetService(typeof(TimerService)) as TimerService;
-                            if (timerService != null)
-                            {
-                                timerService.SetMode(TimerMode.Focus, TimeSpan.FromMinutes(50));
-                                timerService.Start();
-                            }
+                            case "startFocus":
+                                // Trigger the start of a new focus session
+                                StartNextFocusSession();
+                                break;
+                            case "dismiss":
+                                // Optionally handle dismiss action if added
+                                // For now, just activate the window
+                                break;
+                            default:
+                                // Handle any other potential actions
+                                System.Diagnostics.Debug.WriteLine($"Unknown notification action: {action}");
+                                break;
                         }
                     }
 
-                    // Handle quick note input
-                    if (args.UserInput.TryGetValue("quickNote", out var note) && !string.IsNullOrWhiteSpace(note))
+                    // Handle text input from the notification (e.g., quick note)
+                    if (args.UserInput.TryGetValue("quickNote", out string note) && !string.IsNullOrWhiteSpace(note))
                     {
-                        // Save note to session or storage
                         SaveQuickNote(note);
                     }
 
-                    // FIXED: Safer window activation using proper cast
-                    var app = App.Current as App;
-                    app?.MainWindow?.Activate();
+                    // Always bring the main application window to the foreground
+                    ActivateMainWindow();
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Error handling notification: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"Error handling notification activation: {ex.Message}");
                 }
             });
         }
 
+        /// <summary>
+        /// Starts the next focus session based on settings.
+        /// </summary>
+        private void StartNextFocusSession()
+        {
+            try
+            {
+                // Resolve TimerService from the global service provider
+                var timerService = App.Services?.GetService(typeof(TimerService)) as TimerService;
+                if (timerService != null)
+                {
+                    // Get settings to determine the correct focus duration
+                    var settings = App.Services?.GetService(typeof(SettingsModel)) as SettingsModel;
+                    int focusMinutes = settings?.DefaultFocusMinutes ?? 50; // Fallback to 50 mins
+
+                    // Configure and start the timer for a new focus session
+                    timerService.SetMode(TimerMode.Focus, TimeSpan.FromMinutes(focusMinutes));
+                    timerService.Start();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error starting next focus session from notification: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Saves a quick note entered via the notification input.
+        /// </summary>
+        /// <param name="note">The text of the note.</param>
         private void SaveQuickNote(string note)
         {
             try
             {
-                // IMPROVED: Persist quick notes to file
-                var notesFile = Path.Combine(
-                    ApplicationData.Current.LocalFolder.Path,
-                    "QuickNotes.txt");
-
-                var noteEntry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {note}\n";
+                // Example: Append the note to a text file
+                var notesFile = Path.Combine(ApplicationData.Current.LocalFolder.Path, "QuickNotes.txt");
+                var noteEntry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {note}{Environment.NewLine}";
                 File.AppendAllText(notesFile, noteEntry);
 
-                System.Diagnostics.Debug.WriteLine($"Quick note saved: {note}");
+                System.Diagnostics.Debug.WriteLine($"Quick note saved from notification: {note}");
+                // Future enhancement: Save to current session or a dedicated notes service
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Failed to save quick note: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Failed to save quick note from notification: {ex.Message}");
             }
         }
 
-        // Better strong-typed argument parsing
-        private NotificationAction ParseArguments(string argumentString)
+        /// <summary>
+        /// Activates the main application window.
+        /// </summary>
+        private void ActivateMainWindow()
         {
-            var dict = new Dictionary<string, string>();
-
-            if (!string.IsNullOrEmpty(argumentString))
+            try
             {
-                foreach (var part in argumentString.Split('&'))
+                // Safely get the main window instance and activate it
+                var app = App.Current as App;
+                app?.MainWindow?.Activate();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error activating main window from notification: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Parses the query-string-like arguments from a notification activation.
+        /// </summary>
+        /// <param name="argumentString">The raw argument string (e.g., "action=startFocus&param=value").</param>
+        /// <returns>A dictionary of key-value pairs.</returns>
+        private Dictionary<string, string> ParseArguments(string argumentString)
+        {
+            var result = new Dictionary<string, string>();
+            if (string.IsNullOrEmpty(argumentString))
+                return result;
+
+            foreach (var part in argumentString.Split('&'))
+            {
+                var keyValue = part.Split('=');
+                if (keyValue.Length == 2)
                 {
-                    var keyValue = part.Split('=');
-                    if (keyValue.Length == 2)
-                    {
-                        dict[keyValue[0]] = WebUtility.UrlDecode(keyValue[1]);
-                    }
+                    // URL decode the value in case it contains special characters
+                    result[keyValue[0]] = WebUtility.UrlDecode(keyValue[1]);
                 }
             }
-
-            var actionName = dict.TryGetValue("action", out var action) ? action : "";
-            return new NotificationAction(actionName, dict);
+            return result;
         }
 
+        /// <summary>
+        /// Plays the configured notification sound.
+        /// </summary>
         private void PlayNotificationSound()
         {
+            // Ensure MediaPlayer operations happen on the UI thread dispatcher
             _dispatcherQueue.TryEnqueue(() =>
             {
                 try
                 {
-                    // Keep MediaPlayer reference to prevent GC
+                    // Create a new MediaPlayer instance for this sound play
                     _mediaPlayer = new MediaPlayer();
+
+                    // Set up disposal when playback ends to free resources
                     _mediaPlayer.MediaEnded += (s, e) =>
                     {
                         _mediaPlayer?.Dispose();
                         _mediaPlayer = null;
                     };
 
+                    // Determine the sound source based on settings
                     if (_settings.UseWindowsNotificationSound)
                     {
                         _mediaPlayer.Source = MediaSource.CreateFromUri(
@@ -249,59 +356,96 @@ namespace FocusMate.Services
                     }
                     else if (!string.IsNullOrEmpty(_settings.CustomSoundPath))
                     {
-                        // Validate file existence first
-                        if (File.Exists(_settings.CustomSoundPath))
+                        // IMPROVED: Add validation for URI format
+                        try
                         {
-                            _mediaPlayer.Source = MediaSource.CreateFromUri(
-                                new Uri(_settings.CustomSoundPath));
+                            // Validate file existence first
+                            if (File.Exists(_settings.CustomSoundPath))
+                            {
+                                // Test URI creation to catch format issues
+                                var testUri = new Uri(_settings.CustomSoundPath);
+                                _mediaPlayer.Source = MediaSource.CreateFromUri(testUri);
+                            }
+                            else
+                            {
+                                System.Diagnostics.Debug.WriteLine($"Custom sound file not found: {_settings.CustomSoundPath}");
+                                // Fallback to system default if custom path is invalid
+                                _mediaPlayer.Source = MediaSource.CreateFromUri(
+                                    new Uri("ms-winsoundevent:Notification.Default"));
+                            }
                         }
-                        else
+                        catch (UriFormatException uriEx)
                         {
-                            // File doesn't exist - fallback to system sound
+                            System.Diagnostics.Debug.WriteLine($"Invalid URI format for custom sound: {uriEx.Message}");
+                            // Fallback to system default if URI is malformed
+                            _mediaPlayer.Source = MediaSource.CreateFromUri(
+                                new Uri("ms-winsoundevent:Notification.Default"));
+                        }
+                        catch (Exception fileEx) // Catch other potential file access issues
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Error accessing custom sound file: {fileEx.Message}");
+                            // Fallback to system default if file access fails
                             _mediaPlayer.Source = MediaSource.CreateFromUri(
                                 new Uri("ms-winsoundevent:Notification.Default"));
                         }
                     }
+                    else
+                    {
+                        // Fallback to system default if custom path is empty/null
+                        _mediaPlayer.Source = MediaSource.CreateFromUri(
+                            new Uri("ms-winsoundevent:Notification.Default"));
+                    }
 
+                    // Start playing the sound
                     _mediaPlayer.Play();
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Sound playback error: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"Error playing notification sound: {ex.Message}");
+                    // Ensure cleanup even if playback fails
                     _mediaPlayer?.Dispose();
                     _mediaPlayer = null;
                 }
             });
         }
 
-        // DON'T dispose notification registration - keep it at app level
+        /// <summary>
+        /// Unsubscribes from events and cleans up resources.
+        /// IMPORTANT: For AppNotificationManager, you typically should NOT call Unregister
+        /// unless the app is truly shutting down, as it can disable all notifications for the app.
+        /// </summary>
         public void Dispose()
         {
             if (_isDisposed) return;
             _isDisposed = true;
 
-            // Only unsubscribe from events, don't unregister
-            AppNotificationManager.Default.NotificationInvoked -= OnNotificationInvoked;
-
-            // Dispose media player if still active
-            _mediaPlayer?.Dispose();
-            _mediaPlayer = null;
-
-            // Cancel validation task if still running
-            if (_validateAssetsTask?.IsCompleted == false)
+            try
             {
-                // Note: We can't cancel the task, but we can ignore its result
+                // Unsubscribe from the notification activation event to prevent leaks
+                AppNotificationManager.Default.NotificationInvoked -= OnNotificationInvoked;
+
+                // DO NOT call AppNotificationManager.Default.Unregister() here.
+                // Unregistering stops the app from receiving *any* notifications,
+                // even from external sources like scheduled tasks.
+                // It should only be called when the app process exits.
+                // AppNotificationManager.Default.Unregister();
+
+                // Dispose the MediaPlayer if it's still active
+                _mediaPlayer?.Dispose();
+                _mediaPlayer = null;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error during NotificationService disposal: {ex.Message}");
             }
         }
     }
 
-    // For testability and future-proofing
+    // Interface for testability and abstraction
     public interface INotificationService
     {
-        Task ShowSessionCompleteNotification(TimerMode mode);
-        Task ShowFocusLockNotification(string appName);
+        // IMPROVED: Return notification ID
+        Task<uint> ShowSessionCompleteNotification(TimerMode mode);
+        Task<uint> ShowFocusLockNotification(string appName);
     }
-
-    // Better strong-typed arguments
-    public record NotificationAction(string Name, Dictionary<string, string> Parameters);
 }
