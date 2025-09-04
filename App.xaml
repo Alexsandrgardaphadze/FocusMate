@@ -1,16 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Application
-    x:Class="FocusMate.App"
-    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:FocusMate">
+x:Class="FocusMate.App"
+xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+xmlns:hni="using:H.NotifyIcon">
+
+
     <Application.Resources>
-        <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries>
-                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
-                <!-- Other merged dictionaries here -->
-            </ResourceDictionary.MergedDictionaries>
-            <!-- Other app resources here -->
-        </ResourceDictionary>
+        <!-- System tray icon definition -->
+        <hni:TaskbarIcon x:Key="TrayIcon"
+            IconSource="ms-appx:///Assets/Icons/tray.ico"
+            ToolTipText="FocusMate - Ready"
+            LeftClick="TaskbarIcon_LeftClick">
+            <hni:TaskbarIcon.ContextFlyout>
+                <MenuFlyout>
+                    <MenuFlyoutItem x:Name="StartPauseItem" Text="Start" Click="StartPause_Click"/>
+                    <MenuFlyoutSubItem Text="Switch Mode">
+                        <MenuFlyoutItem Text="Focus" Tag="Focus" Click="Mode_Click"/>
+                        <MenuFlyoutItem Text="Short Break" Tag="ShortBreak" Click="Mode_Click"/>
+                        <MenuFlyoutItem Text="Long Break" Tag="LongBreak" Click="Mode_Click"/>
+                    </MenuFlyoutSubItem>
+                    <MenuFlyoutSeparator/>
+                    <MenuFlyoutItem x:Name="ShowHideItem" Text="Hide FocusMate" Click="ShowHide_Click"/>
+                    <MenuFlyoutSeparator/>
+                    <MenuFlyoutItem Text="Exit" Click="Exit_Click"/>
+                </MenuFlyout>
+            </hni:TaskbarIcon.ContextFlyout>
+        </hni:TaskbarIcon>
     </Application.Resources>
 </Application>

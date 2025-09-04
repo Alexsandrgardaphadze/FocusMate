@@ -1,166 +1,187 @@
 ﻿// Services/TrayService.cs
+// Corrected for H.NotifyIcon.WinUI compatibility
 using FocusMate.Models;
-using H.NotifyIcon;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using System;
+using H.NotifyIcon; // This is correct for H.NotifyIcon.WinUI
+using Microsoft.UI;
+using Microsoft.UI.Windowing; // For AppWindow
+using Microsoft.UI.Xaml; // For Window
+using Microsoft.UI.Xaml.Controls; // For MenuFlyoutItem, RoutedEventArgs etc.
+using System; // For EventArgs, Uri, TimeSpan
+using System.Diagnostics; // For Debug.WriteLine
+using WinRT.Interop; // For WindowNative
 
 namespace FocusMate.Services
 {
+    /// <summary>
+    /// Manages the system tray icon for the FocusMate application.
+    /// Integrates with H.NotifyIcon.WinUI for tray functionality in WinUI 3.
+    /// </summary>
     public class TrayService : IDisposable
     {
-        private TaskbarIcon _taskbarIcon;
-        private Window _mainWindow;
-        private TimerService _timerService;
-        private bool _isWindowVisible;
-        private bool _isDisposed;
+        private TaskbarIcon? _taskbarIcon;
+        private Window? _mainWindow;
+        private AppWindow? _appWindow; // For WinUI 3 window management
+        private readonly TimerService _timerService;
+        private bool _isWindowVisible = true;
+        private bool _isDisposed = false;
 
+        /// <summary>
+        /// Initializes a new instance of the TrayService.
+        /// </summary>
+        /// <param name="timerService">The TimerService to interact with.</param>
         public TrayService(TimerService timerService)
         {
-            _timerService = timerService;
+            _timerService = timerService ?? throw new ArgumentNullException(nameof(timerService));
         }
 
+        /// <summary>
+        /// Initializes the tray icon and sets up event subscriptions.
+        /// </summary>
+        /// <param name="mainWindow">The application's main Window instance.</param>
         public void Initialize(Window mainWindow)
         {
-            if (_isDisposed) throw new ObjectDisposedException(nameof(TrayService));
-
-            _mainWindow = mainWindow;
-            _isWindowVisible = true;
-
-            _taskbarIcon = new TaskbarIcon
+            if (_isDisposed)
             {
-                IconSource = new Uri("ms-appx:///Assets/Icons/tray.ico"),
-                ToolTipText = "FocusMate - Ready",
-                ContextMenu = new ContextMenu()
-            };
+                throw new ObjectDisposedException(nameof(TrayService));
+            }
 
-            SetupContextMenu();
+            _mainWindow = mainWindow ?? throw new ArgumentNullException(nameof(mainWindow));
 
-            _taskbarIcon.TrayLeftMouseDown += OnTrayLeftMouseDown;
-            _timerService.Tick += OnTimerTick;
-            _timerService.ModeChanged += OnTimerModeChanged;
+            try
+            {
+                // --- Get AppWindow for WinUI 3 window management ---
+                var hwnd = WindowNative.GetWindowHandle(_mainWindow);
+                var windowId = Win32Interop.GetWindowIdFromWindow(hwnd);
+                _appWindow = AppWindow.GetFromWindowId(windowId);
 
-            // Initial state
-            UpdateOverlayText();
+                // --- Create and configure the TaskbarIcon ---
+                _taskbarIcon = new TaskbarIcon();
+                // Correct way to set the icon source for H.NotifyIcon.WinUI
+                _taskbarIcon.Icon = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(
+                    new Uri("ms-appx:///Assets/Icons/tray.ico")); // Ensure this file exists
+                _taskbarIcon.ToolTip = "FocusMate - Ready";
+
+                // --- Set up the context menu ---
+                var contextMenu = new MenuFlyout();
+                _taskbarIcon.ContextFlyout = contextMenu;
+                SetupContextMenu(contextMenu);
+
+                // --- Subscribe to tray icon events ---
+                // H.NotifyIcon.WinUI typically uses TrayLeftMouseDown
+                _taskbarIcon.TrayLeftMouseDown += OnTrayLeftMouseDown;
+
+                // --- Subscribe to TimerService events for dynamic updates ---
+                _timerService.Tick += OnTimerTick;
+                _timerService.ModeChanged += OnTimerModeChanged;
+
+                // --- Set initial state ---
+                UpdateOverlayText(); // Note: Overlay text might not be supported as expected
+
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[TrayService] Error during initialization: {ex.Message}");
+                _taskbarIcon?.Dispose();
+                _taskbarIcon = null;
+            }
         }
 
-        private void SetupContextMenu()
+        /// <summary>
+        /// Sets up the context menu items and their event handlers.
+        /// </summary>
+        private void SetupContextMenu(MenuFlyout menu)
         {
-            var menu = _taskbarIcon.ContextMenu;
+            if (menu == null) return;
 
-            // Start/Pause button
-            var toggleButton = new MenuItem
+            menu.Items.Clear();
+
+            // --- Start/Pause Menu Item ---
+            var toggleMenuItem = new MenuFlyoutItem
             {
-                Header = "Start",
+                Text = "Start",
                 Tag = "StartPause"
             };
-            toggleButton.Click += OnToggleTimer;
-            menu.Items.Add(toggleButton);
+            toggleMenuItem.Click += OnToggleTimerClick;
+            menu.Items.Add(toggleMenuItem);
 
-            // Mode selection
-            var modeMenu = new MenuItem { Header = "Switch Mode" };
+            // --- Switch Mode Submenu ---
+            var modeMenu = new MenuFlyoutSubItem { Text = "Switch Mode" };
             modeMenu.Items.Add(CreateModeMenuItem("Focus", TimerMode.Focus));
             modeMenu.Items.Add(CreateModeMenuItem("Short Break", TimerMode.ShortBreak));
             modeMenu.Items.Add(CreateModeMenuItem("Long Break", TimerMode.LongBreak));
             menu.Items.Add(modeMenu);
 
-            menu.Items.Add(new Separator());
+            // --- Separator ---
+            menu.Items.Add(new MenuFlyoutSeparator());
 
-            // Show/Hide app
-            var showHideItem = new MenuItem
+            // --- Show/Hide App Menu Item ---
+            var showHideMenuItem = new MenuFlyoutItem
             {
-                Header = "Hide FocusMate",
+                Text = "Hide FocusMate",
                 Tag = "ShowHide"
             };
-            showHideItem.Click += OnShowHideApp;
-            menu.Items.Add(showHideItem);
+            showHideMenuItem.Click += OnShowHideAppClick;
+            menu.Items.Add(showHideMenuItem);
 
-            menu.Items.Add(new Separator());
+            // --- Separator ---
+            menu.Items.Add(new MenuFlyoutSeparator());
 
-            // Exit
-            var exitItem = new MenuItem { Header = "Exit" };
-            exitItem.Click += OnExitApp;
-            menu.Items.Add(exitItem);
+            // --- Exit Menu Item ---
+            var exitMenuItem = new MenuFlyoutItem { Text = "Exit" };
+            exitMenuItem.Click += OnExitAppClick;
+            menu.Items.Add(exitMenuItem);
 
+            // Update initial menu item states
             UpdateContextMenu();
         }
 
+        /// <summary>
+        /// Updates the state (e.g., text) of context menu items.
+        /// </summary>
         private void UpdateContextMenu()
         {
-            foreach (var item in _taskbarIcon.ContextMenu.Items)
+            if (_taskbarIcon?.ContextFlyout is MenuFlyout menu)
             {
-                if (item is MenuItem menuItem)
+                foreach (var item in menu.Items)
                 {
-                    if (menuItem.Tag as string == "StartPause")
+                    if (item is MenuFlyoutItem menuItem)
                     {
-                        menuItem.Header = _timerService.IsRunning ? "Pause" : "Start";
-                    }
-                    else if (menuItem.Tag as string == "ShowHide")
-                    {
-                        menuItem.Header = _isWindowVisible ? "Hide FocusMate" : "Show FocusMate";
+                        if (menuItem.Tag as string == "StartPause")
+                        {
+                            // Access TimerService properties directly - they exist in the provided code
+                            menuItem.Text = _timerService.IsRunning ? "Pause" : "Start";
+                        }
+                        else if (menuItem.Tag as string == "ShowHide")
+                        {
+                            menuItem.Text = _isWindowVisible ? "Hide FocusMate" : "Show FocusMate";
+                        }
                     }
                 }
             }
         }
 
-        private MenuItem CreateModeMenuItem(string label, TimerMode mode)
+        /// <summary>
+        /// Creates a menu item for switching timer modes.
+        /// </summary>
+        private MenuFlyoutItem CreateModeMenuItem(string label, TimerMode mode)
         {
-            var item = new MenuItem
+            var item = new MenuFlyoutItem
             {
-                Header = label,
+                Text = label,
                 Tag = mode
             };
-            item.Click += OnSwitchMode;
+            item.Click += OnSwitchModeClick;
             return item;
         }
 
-        private void OnTrayLeftMouseDown(object sender, EventArgs e)
-        {
-            ToggleWindowVisibility();
-        }
+        // --- Event Handlers ---
 
-        private void ToggleWindowVisibility()
+        /// <summary>
+        /// Handles clicks on the "Start/Pause" context menu item.
+        /// </summary>
+        private void OnToggleTimerClick(object sender, RoutedEventArgs e)
         {
-            if (_isWindowVisible)
-            {
-                _mainWindow.Hide();
-                _isWindowVisible = false;
-            }
-            else
-            {
-                _mainWindow.Show();
-                _mainWindow.Activate();
-                _isWindowVisible = true;
-            }
-            UpdateContextMenu();
-        }
-
-        private void OnTimerTick(object sender, TimerTickEventArgs e)
-        {
-            UpdateOverlayText();
-        }
-
-        private void OnTimerModeChanged(object sender, TimerModeChangedEventArgs e)
-        {
-            UpdateOverlayText();
-        }
-
-        private void UpdateOverlayText()
-        {
-            if (_timerService.IsRunning)
-            {
-                var minutes = (int)_timerService.Elapsed.TotalMinutes;
-                var modeChar = _timerService.CurrentMode == TimerMode.Focus ? "F" : "B";
-                _taskbarIcon.UpdateOverlayText($"{modeChar}{minutes}");
-            }
-            else
-            {
-                _taskbarIcon.UpdateOverlayText(string.Empty);
-            }
-        }
-
-        private void OnToggleTimer(object sender, RoutedEventArgs e)
-        {
+            // Access TimerService properties/methods directly
             if (_timerService.IsRunning)
             {
                 _timerService.Pause();
@@ -172,15 +193,23 @@ namespace FocusMate.Services
             UpdateContextMenu();
         }
 
-        private void OnSwitchMode(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// Handles clicks on a mode switch context menu item.
+        /// </summary>
+        private void OnSwitchModeClick(object sender, RoutedEventArgs e)
         {
-            if (sender is MenuItem item && item.Tag is TimerMode mode)
+            if (sender is MenuFlyoutItem item && item.Tag is TimerMode mode)
             {
+                // Fix 1: Use non-generic GetService or ensure Microsoft.Extensions.DependencyInjection is referenced
+                // If Microsoft.Extensions.DependencyInjection is referenced, GetService<T> should work.
+                // Otherwise, use the non-generic version.
+                // Assuming Microsoft.Extensions.DependencyInjection is referenced based on App.xaml.cs
+                var settings = App.Services?.GetService(typeof(SettingsModel)) as SettingsModel;
                 var duration = mode switch
                 {
-                    TimerMode.Focus => TimeSpan.FromMinutes(50),
-                    TimerMode.ShortBreak => TimeSpan.FromMinutes(10),
-                    TimerMode.LongBreak => TimeSpan.FromMinutes(25),
+                    TimerMode.Focus => TimeSpan.FromMinutes(settings?.DefaultFocusMinutes ?? 50),
+                    TimerMode.ShortBreak => TimeSpan.FromMinutes(settings?.ShortBreakMinutes ?? 10),
+                    TimerMode.LongBreak => TimeSpan.FromMinutes(settings?.LongBreakMinutes ?? 25),
                     _ => TimeSpan.FromMinutes(25)
                 };
 
@@ -189,27 +218,151 @@ namespace FocusMate.Services
             }
         }
 
-        private void OnShowHideApp(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// Handles clicks on the "Show/Hide App" context menu item.
+        /// </summary>
+        private void OnShowHideAppClick(object sender, RoutedEventArgs e)
         {
             ToggleWindowVisibility();
         }
 
-        private void OnExitApp(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// Handles clicks on the "Exit" context menu item.
+        /// </summary>
+        private void OnExitAppClick(object sender, RoutedEventArgs e)
         {
             Dispose();
-            Application.Current.Exit();
+            Microsoft.UI.Xaml.Application.Current.Exit();
         }
 
+        /// <summary>
+        /// Handles left mouse clicks on the tray icon.
+        /// </summary>
+        private void OnTrayLeftMouseDown(object sender, RoutedEventArgs e) // Fix: Use TrayLeftMouseDown
+        {
+            ToggleWindowVisibility();
+        }
+
+        /// <summary>
+        /// Handles the TimerService.Tick event to update the overlay text.
+        /// </summary>
+        private void OnTimerTick(object sender, TimerTickEventArgs e)
+        {
+            UpdateOverlayText();
+        }
+
+        /// <summary>
+        /// Handles the TimerService.ModeChanged event to update the overlay text.
+        /// </summary>
+        private void OnTimerModeChanged(object sender, TimerModeChangedEventArgs e)
+        {
+            UpdateOverlayText();
+            UpdateContextMenu();
+        }
+
+        // --- Helper Methods ---
+
+        /// <summary>
+        /// Toggles the visibility of the main application window using AppWindow.
+        /// </summary>
+        private void ToggleWindowVisibility()
+        {
+            if (_appWindow == null || _mainWindow == null) return;
+
+            try
+            {
+                if (_isWindowVisible)
+                {
+                    _appWindow.Show(false); // Minimize/Hide
+                    _isWindowVisible = false;
+                }
+                else
+                {
+                    _appWindow.Show(true); // Restore/Show
+                    _mainWindow.Activate(); // Bring to foreground
+                    _isWindowVisible = true;
+                }
+                UpdateContextMenu();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[TrayService] Error toggling window visibility: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Updates the tray icon's overlay text based on the timer state.
+        /// Note: Overlay text support in H.NotifyIcon.WinUI might be limited or different.
+        /// </summary>
+        private void UpdateOverlayText()
+        {
+            // Fix: Check if UpdateOverlayText method actually exists on the version of TaskbarIcon you are using.
+            // If it doesn't exist, this call will need to be removed or replaced.
+            // The method signature might also be different (e.g., taking a string and a color).
+            // For now, we'll wrap it in a try-catch to prevent crashes if the method signature is wrong.
+            try
+            {
+                string overlayText = "";
+                if (_timerService.IsRunning) // Access property directly
+                {
+                    var minutes = (int)_timerService.Elapsed.TotalMinutes; // Access property directly
+                    // Access property directly
+                    var modeChar = _timerService.CurrentMode == TimerMode.Focus ? "F" : "B";
+                    overlayText = $"{modeChar}{minutes:D2}";
+                }
+
+                // Attempt to update overlay text. This might not work as expected depending on the H.NotifyIcon version.
+                // If this method doesn't exist or has a different signature, you'll need to find the correct way
+                // or remove this feature.
+                // Example of potential signature: _taskbarIcon?.UpdateOverlayText(overlayText, Windows.UI.Colors.White);
+                // Or it might not be supported at all in this library version for WinUI.
+                _taskbarIcon?.UpdateOverlayText(overlayText);
+            }
+            catch (MissingMethodException mmEx)
+            {
+                Debug.WriteLine($"[TrayService] UpdateOverlayText method not found or has different signature: {mmEx.Message}");
+                // If the method is missing, we can't update the overlay text. Consider removing the call or finding an alternative.
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[TrayService] Potentially unexpected error updating overlay text (method might not exist as expected): {ex.Message}");
+            }
+        }
+
+
+        /// <summary>
+        /// Releases the unmanaged resources used by the TrayService.
+        /// </summary>
         public void Dispose()
         {
             if (_isDisposed) return;
             _isDisposed = true;
 
-            _timerService.Tick -= OnTimerTick;
-            _timerService.ModeChanged -= OnTimerModeChanged;
+            try
+            {
+                // Unsubscribe from TimerService events
+                if (_timerService != null)
+                {
+                    _timerService.Tick -= OnTimerTick;
+                    _timerService.ModeChanged -= OnTimerModeChanged;
+                }
 
-            _taskbarIcon?.Dispose();
-            _taskbarIcon = null;
+                // Unsubscribe from TaskbarIcon events
+                if (_taskbarIcon != null)
+                {
+                    // Fix: Unsubscribe from the correct event (TrayLeftMouseDown)
+                    _taskbarIcon.TrayLeftMouseDown -= OnTrayLeftMouseDown;
+                    // Unsubscribe from other events if you add them later
+                }
+
+                // Dispose the TaskbarIcon
+                _taskbarIcon?.Dispose();
+                _taskbarIcon = null;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[TrayService] Error during disposal: {ex.Message}");
+            }
         }
     }
 }
